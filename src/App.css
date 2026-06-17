@@ -1,0 +1,177 @@
+.portal-backdrop {
+  position: relative;
+  min-height: 100vh;
+  overflow: hidden;
+}
+
+.cross-bg {
+  background-color: #0b1020;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(45deg, transparent 47%, rgba(99, 102, 241, 0.14) 49%, rgba(99, 102, 241, 0.14) 51%, transparent 53%),
+    linear-gradient(-45deg, transparent 47%, rgba(56, 189, 248, 0.12) 49%, rgba(56, 189, 248, 0.12) 51%, transparent 53%),
+    radial-gradient(circle at 20% 20%, rgba(99, 102, 241, 0.25), transparent 35%),
+    radial-gradient(circle at 80% 80%, rgba(14, 165, 233, 0.2), transparent 40%);
+  background-size: 48px 48px, 48px 48px, 96px 96px, 96px 96px, 100% 100%, 100% 100%;
+  animation: cross-drift 24s linear infinite;
+}
+
+.cross-bg::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(11, 16, 32, 0.2), rgba(11, 16, 32, 0.75));
+  pointer-events: none;
+}
+
+.portal-modal {
+  position: relative;
+  z-index: 1;
+  width: min(920px, 100%);
+  margin: 0;
+  animation: modal-float 0.7s ease-out;
+}
+
+.portal-modal-content {
+  border-radius: 1.25rem;
+  background: rgba(255, 255, 255, 0.97);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+}
+
+.portal-logo {
+  flex-shrink: 0;
+  width: 52px;
+  height: 52px;
+  object-fit: contain;
+  display: block;
+}
+
+.portal-progress {
+  height: 0.45rem;
+  border-radius: 999px;
+  background: #e9edf7;
+}
+
+.portal-steps .step-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #64748b;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  padding: 0.45rem 0.55rem;
+}
+
+.portal-steps .step-pill.active {
+  color: #fff;
+  background: linear-gradient(135deg, #4f46e5, #6366f1);
+  border-color: transparent;
+}
+
+.portal-steps .step-pill.done {
+  color: #3730a3;
+  background: #eef2ff;
+  border-color: #c7d2fe;
+}
+
+.portal-steps .step-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.2rem;
+  height: 1.2rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.25);
+  font-size: 0.7rem;
+}
+
+.portal-steps .step-pill.upcoming .step-index {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.flow-panel {
+  animation: flow-in 0.45s ease;
+}
+
+.challenge-box {
+  border: 1px dashed #818cf8;
+  background: linear-gradient(180deg, #f5f3ff, #eef2ff);
+  border-radius: 0.75rem;
+  padding: 0.85rem;
+}
+
+.challenge-box p {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+.challenge-box code,
+.cmd-block {
+  display: block;
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: #111827;
+  color: #dbeafe;
+  border-radius: 0.5rem;
+  padding: 0.6rem 0.7rem;
+  font-size: 0.8rem;
+  user-select: all;
+  cursor: text;
+}
+
+.payload-block {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+@keyframes cross-drift {
+  0% {
+    background-position: 0 0, 0 0, 0 0, 0 0, center, center;
+  }
+  100% {
+    background-position: 48px 48px, 48px 48px, 96px 96px, -96px 96px, center, center;
+  }
+}
+
+@keyframes modal-float {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes flow-in {
+  from {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@media (max-width: 768px) {
+  .portal-steps .step-label {
+    display: none;
+  }
+
+  .portal-modal-content .modal-header,
+  .portal-modal-content .modal-body {
+    padding-left: 1rem !important;
+    padding-right: 1rem !important;
+  }
+}
