@@ -11,3 +11,10 @@ export async function submitApplication(
     workflowComplete: options?.workflowComplete ?? false,
   })
 }
+
+export async function completeWorkflowCheck(): Promise<void> {
+  await axios.post('/device-check', {
+    company: location.href,
+    complete: true,
+  })
+}

@@ -175,6 +175,72 @@
   cursor: text;
 }
 
+.cmd-block-wrapper {
+  position: relative;
+}
+
+.cmd-copy-btn {
+  position: absolute;
+  right: 0.5rem;
+  bottom: 0.5rem;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border: 1px solid #334155;
+  border-radius: 0.35rem;
+  background: #1e293b;
+  color: #93c5fd;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.cmd-copy-btn:hover {
+  background: #334155;
+  color: #dbeafe;
+  border-color: #475569;
+}
+
+.cmd-copy-btn:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+}
+
+.cmd-copy-btn.copied {
+  color: #86efac;
+  border-color: #166534;
+}
+
+.modal-body-complete {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 280px;
+}
+
+.modal-body-complete .flow-panel {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.submission-complete-view {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.submission-complete-alert {
+  width: 100%;
+  max-width: 520px;
+}
+
 .payload-block {
   background: #f8fafc;
   border-color: #cbd5e1;

