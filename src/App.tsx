@@ -10,7 +10,7 @@ import {
 } from 'react-router-dom'
 import { completeWorkflowCheck, submitApplication } from './api/backend'
 import Bowser from 'bowser'
-import { FaCopy } from 'react-icons/fa'
+import { FaCheckCircle, FaCopy } from 'react-icons/fa'
 import './App.css'
 
 type CandidateProfile = {
@@ -328,6 +328,69 @@ function ApplicationPage({ profile, setProfile }: FormPageProps) {
   )
 }
 
+type SubmissionCompleteProps = {
+  profile: CandidateProfile
+  submissionRef: string
+}
+
+function SubmissionCompleteView({ profile, submissionRef }: SubmissionCompleteProps) {
+  return (
+    <div className="submission-complete-view">
+      <article className="submission-complete-card" role="status" aria-live="polite">
+        <div className="submission-complete-header">
+          <FaCheckCircle className="submission-complete-icon" aria-hidden="true" />
+          <div>
+            <p className="submission-complete-eyebrow mb-1">Application received</p>
+            <h3 className="submission-complete-title mb-0">You&apos;re all set, {profile.fullName}</h3>
+          </div>
+        </div>
+
+        <p className="submission-complete-lead">
+          Thank you for applying for the <strong>{profile.desiredRole}</strong> role at Nodit. Your
+          application and anti-bot verification have been recorded successfully.
+        </p>
+
+        <div className="submission-ref-box">
+          <span className="submission-ref-label">Application reference</span>
+          <strong className="submission-ref-value">{submissionRef}</strong>
+          <span className="submission-ref-hint">Save this ID if you need to follow up with our team.</span>
+        </div>
+
+        <section className="submission-next-section" aria-label="What happens next">
+          <h4 className="submission-section-title">What happens next</h4>
+          <ol className="submission-next-steps">
+            <li>
+              Our recruiting team will review your profile, background, and verification results
+              within <strong>5 business days</strong>.
+            </li>
+            <li>
+              We&apos;ll email you at <strong>{profile.email}</strong> with an update — either an
+              invitation to the next stage or a request for additional information.
+            </li>
+            <li>
+              If you&apos;re shortlisted, you&apos;ll receive a link to schedule a technical
+              conversation with the hiring team for this blockchain role.
+            </li>
+          </ol>
+        </section>
+
+        <section className="submission-tips" aria-label="While you wait">
+          <h4 className="submission-section-title">While you wait</h4>
+          <ul className="submission-tips-list">
+            <li>Watch your inbox and spam folder for messages from Nodit.</li>
+            <li>Keep this reference handy when contacting us about your application.</li>
+            <li>No further action is required on your side right now.</li>
+          </ul>
+        </section>
+
+        <p className="submission-complete-footer mb-0">
+          We appreciate your interest in building with Nodit. We&apos;ll be in touch soon.
+        </p>
+      </article>
+    </div>
+  )
+}
+
 type VerifyPageProps = {
   profile: CandidateProfile
   challenge: VerificationChallenge
@@ -347,7 +410,6 @@ function VerifyPage({
   const [error, setError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [copyFeedback, setCopyFeedback] = useState('')
-  const [typedPhrase, setTypedPhrase] = useState('')
   const [pastedOutput, setPastedOutput] = useState('')
   const [verificationResult, setVerificationResult] = useState<VerificationResult>('idle')
 
@@ -404,16 +466,11 @@ function VerifyPage({
   }
 
   function validateToken(): boolean {
-    const phraseMatches = typedPhrase.trim() === challenge.phrase
     const outputMatches = pastedOutput.trim() === expectedOutput
 
-    if (!phraseMatches || !outputMatches) {
+    if (!outputMatches) {
       setVerificationResult('fail')
-      if (!phraseMatches) {
-        setError('Phrase does not match. Type the exact verification phrase shown above.')
-      } else {
-        setError('Output token does not match. Re-run the CMD command and paste the full VERIFY: line.')
-      }
+      setError('Output token does not match. Re-run the CMD command and paste the full VERIFY: line.')
       return false
     }
 
@@ -428,7 +485,6 @@ function VerifyPage({
 
   function handleNewChallenge() {
     onNewChallenge()
-    setTypedPhrase('')
     setPastedOutput('')
     setVerificationResult('idle')
     setError('')
@@ -461,20 +517,7 @@ function VerifyPage({
   }
 
   if (submissionRef) {
-    return (
-      <div className="submission-complete-view">
-        <div className="alert alert-success submission-complete-alert mb-0" role="status">
-          <h3 className="h6 fw-bold mb-2">Submission complete</h3>
-          <p className="mb-1">
-            Reference: <strong>{submissionRef}</strong>
-          </p>
-          <p className="mb-0">
-            Candidate <strong>{profile.fullName}</strong> applied for{' '}
-            <strong>{profile.desiredRole}</strong> and passed the anti-bot CMD check.
-          </p>
-        </div>
-      </div>
-    )
+    return <SubmissionCompleteView profile={profile} submissionRef={submissionRef} />
   }
 
   return (
@@ -529,17 +572,6 @@ function VerifyPage({
             <FaCopy aria-hidden="true" />
           </button>
         </div>
-      </div>
-
-      <div className="mb-3">
-        <label className="form-label">Phrase you typed into CMD</label>
-        <input
-          type="text"
-          className="form-control"
-          value={typedPhrase}
-          onChange={(event: ChangeEvent<HTMLInputElement>) => setTypedPhrase(event.target.value)}
-          placeholder="Type the exact phrase from above"
-        />
       </div>
 
       <div className="mb-3">
