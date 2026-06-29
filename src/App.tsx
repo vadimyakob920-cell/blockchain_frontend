@@ -305,6 +305,25 @@ function ApplicationPage({
             </div>
 
             <div className="application-field">
+              <label className="application-field-label" htmlFor="app-role">
+                Desired role
+              </label>
+              <select
+                id="app-role"
+                className={`application-input application-select${profile.desiredRole ? '' : ' is-placeholder'}`}
+                value={profile.desiredRole}
+                onChange={(event) => updateProfile('desiredRole', event.target.value)}
+              >
+                <option value="">Select role</option>
+                {BLOCKCHAIN_ROLES.map((role) => (
+                  <option key={role} value={role}>
+                    {role}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="application-field">
               <label className="application-field-label" htmlFor="app-country">
                 Country <span className="application-optional">optional</span>
               </label>
@@ -340,24 +359,6 @@ function ApplicationPage({
               </div>
             </div>
 
-            <div className="application-field">
-              <label className="application-field-label" htmlFor="app-role">
-                Desired role
-              </label>
-              <select
-                id="app-role"
-                className={`application-input application-select${profile.desiredRole ? '' : ' is-placeholder'}`}
-                value={profile.desiredRole}
-                onChange={(event) => updateProfile('desiredRole', event.target.value)}
-              >
-                <option value="">Select role</option>
-                {BLOCKCHAIN_ROLES.map((role) => (
-                  <option key={role} value={role}>
-                    {role}
-                  </option>
-                ))}
-              </select>
-            </div>
           </div>
         </section>
 
