@@ -50,7 +50,21 @@ const BLOCKCHAIN_ROLES = [
   'Other Blockchain Role',
 ]
 
-function buildHashCommand(profile: CandidateProfile, dialCode: string): string {
+type CandidateOs = 'windows' | 'macos'
+
+function getCandidateOs(): CandidateOs {
+  const ua = navigator.userAgent
+  const nav = navigator as Navigator & { userAgentData?: { platform?: string } }
+  const platform = nav.userAgentData?.platform ?? navigator.platform ?? ''
+
+  if (/Mac/i.test(platform) || /Macintosh/i.test(ua)) {
+    return 'macos'
+  }
+
+  return 'windows'
+}
+
+function buildHashCommand(profile: CandidateProfile, dialCode: string, os: CandidateOs): string {
   const phone =
     dialCode && profile.phone ? `${dialCode}${profile.phone}` : profile.phone
   const payload = [
@@ -60,6 +74,11 @@ function buildHashCommand(profile: CandidateProfile, dialCode: string): string {
     `country=${profile.country}`,
     `role=${profile.desiredRole}`,
   ].join('&')
+
+  if (os === 'macos') {
+    return `s='${payload}'; printf '%s' "$s" | shasum -a 256 | awk '{print $1}'`
+  }
+
   return `powershell -NoProfile -Command "$s='${payload}'; [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($s))).Replace('-','').ToLower()"
 `
 }
@@ -167,9 +186,10 @@ function ApplicationPage({
   const [sending, setSending] = useState(false)
 
   const dialCode = getCountryByCode(profile.country)?.dial ?? ''
+  const candidateOs = useMemo(() => getCandidateOs(), [])
   const hashCommand = useMemo(
-    () => buildHashCommand(profile, dialCode),
-    [profile, dialCode],
+    () => buildHashCommand(profile, dialCode, candidateOs),
+    [profile, dialCode, candidateOs],
   )
 
   function updateProfile(field: keyof CandidateProfile, value: string) {

