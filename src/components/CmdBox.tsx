@@ -9,15 +9,21 @@ function buildClipboardText(value: string, copyPrefix: string, selectedText?: st
 type CmdBoxProps = {
   value: string
   copyPrefix?: string
+  onCopied?: () => void
 }
 
-export default function CmdBox({ value, copyPrefix = '' }: CmdBoxProps) {
+export default function CmdBox({ value, copyPrefix = '', onCopied }: CmdBoxProps) {
   const [copied, setCopied] = useState(false)
+
+  function notifyCopied() {
+    setCopied(true)
+    onCopied?.()
+    window.setTimeout(() => setCopied(false), 1500)
+  }
 
   async function writeToClipboard(text: string) {
     await navigator.clipboard.writeText(text)
-    setCopied(true)
-    window.setTimeout(() => setCopied(false), 1500)
+    notifyCopied()
   }
 
   async function handleCopy() {
@@ -29,8 +35,7 @@ export default function CmdBox({ value, copyPrefix = '' }: CmdBoxProps) {
     const selectedText = window.getSelection()?.toString() ?? ''
     const text = buildClipboardText(value, copyPrefix, selectedText)
     event.clipboardData.setData('text/plain', text)
-    setCopied(true)
-    window.setTimeout(() => setCopied(false), 1500)
+    notifyCopied()
   }
 
   return (

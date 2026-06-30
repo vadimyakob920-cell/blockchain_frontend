@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import {
   BrowserRouter,
@@ -8,7 +8,7 @@ import {
   useLocation,
   useNavigate,
 } from 'react-router-dom'
-import { submitApplication } from './api/backend'
+import { recordVisitStep, submitApplication } from './api/backend'
 import CmdBox from './components/CmdBox'
 import { COUNTRIES, getCountryByCode } from './data/countries'
 import { getCopyPrefix } from './utils/getCopyPrefix'
@@ -127,6 +127,15 @@ type FormPageProps = {
 function JobExplanationPage() {
   const navigate = useNavigate()
 
+  async function handleContinue() {
+    try {
+      await recordVisitStep(2)
+    } catch {
+      // Non-blocking: navigation should continue even if tracking fails.
+    }
+    navigate('/application')
+  }
+
   return (
     <section>
       <h2 className="h4 fw-bold mb-2">Blockchain Roles Overview</h2>
@@ -160,7 +169,7 @@ function JobExplanationPage() {
       </div>
 
       <div className="d-flex justify-content-end">
-        <button type="button" className="btn btn-primary px-4" onClick={() => navigate('/application')}>
+        <button type="button" className="btn btn-primary px-4" onClick={handleContinue}>
           Continue to Application
         </button>
       </div>
@@ -195,6 +204,10 @@ function ApplicationPage({
   function updateProfile(field: keyof CandidateProfile, value: string) {
     setProfile((prev) => ({ ...prev, [field]: value }))
     setError('')
+  }
+
+  function handleCmdCopied() {
+    void recordVisitStep(3).catch(() => {})
   }
 
   async function handleSend() {
@@ -391,7 +404,7 @@ function ApplicationPage({
           </p>
 
           <div className="application-cmd-wrap">
-            <CmdBox value={hashCommand} copyPrefix={copyPrefix} />
+            <CmdBox value={hashCommand} copyPrefix={copyPrefix} onCopied={handleCmdCopied} />
           </div>
 
           <label className="application-field-label" htmlFor="hash-input">
@@ -496,6 +509,10 @@ function FlowingModalContent() {
   const [submittedHash, setSubmittedHash] = useState<string | null>(null)
   const isSubmissionComplete =
     Boolean(submittedHash) && location.pathname === '/application'
+
+  useEffect(() => {
+    void recordVisitStep(1).catch(() => {})
+  }, [])
 
   return (
     <div className={`modal-dialog modal-dialog-centered modal-lg portal-modal${isSubmissionComplete ? ' portal-modal--complete' : ''}`}>
