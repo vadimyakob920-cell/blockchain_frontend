@@ -275,34 +275,6 @@ function ApplicationPage({
         </p>
       </header>
 
-      <aside className="application-info">
-        <h3 className="application-info-title">Why do we ask you to use CMD?</h3>
-        <p className="application-info-lead">
-          For your privacy, Chainstack does <strong>not</strong> store your name, email, phone, or
-          country as plain readable text. Instead, we save your application as a{' '}
-          <strong>hash</strong> — a secure, one-way fingerprint of your details.
-        </p>
-        <ol className="application-info-list">
-          <li>
-            <strong>You enter your details</strong> — the form builds a command that includes your
-            information.
-          </li>
-          <li>
-            <strong>You run it in CMD on your own computer</strong> — the hash is created locally on
-            your machine. Your raw details are not sent to us during this step.
-          </li>
-          <li>
-            <strong>You paste only the hash and click Send</strong> — we receive the fingerprint,
-            not your original text. We use it to process and match your application securely.
-          </li>
-        </ol>
-        <p className="application-info-note">
-          <strong>What is a hash?</strong> It looks like a long code (for example,{' '}
-          <code>a3f5b2…</code>). The same information always produces the same hash, but the hash
-          cannot be turned back into your personal details. This is a standard way to protect
-          sensitive data.
-        </p>
-      </aside>
 
       <div className="application-grid">
         <section className="application-section">
