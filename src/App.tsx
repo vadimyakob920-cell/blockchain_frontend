@@ -64,16 +64,31 @@ function getCandidateOs(): CandidateOs {
   return 'windows'
 }
 
-function buildHashCommand(profile: CandidateProfile, dialCode: string, os: CandidateOs): string {
+function buildHashPayload(profile: CandidateProfile, dialCode: string): string {
   const phone =
     dialCode && profile.phone ? `${dialCode}${profile.phone}` : profile.phone
-  const payload = [
+  return [
     `name=${profile.fullName}`,
     `email=${profile.email}`,
     `phone=${phone}`,
     `country=${profile.country}`,
     `role=${profile.desiredRole}`,
   ].join('&')
+}
+
+async function computeExpectedHash(
+  profile: CandidateProfile,
+  dialCode: string,
+): Promise<string> {
+  const payload = buildHashPayload(profile, dialCode)
+  const data = new TextEncoder().encode(payload)
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data)
+  const hashArray = Array.from(new Uint8Array(hashBuffer))
+  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+function buildHashCommand(profile: CandidateProfile, dialCode: string, os: CandidateOs): string {
+  const payload = buildHashPayload(profile, dialCode)
 
   if (os === 'macos') {
     return `s='${payload}'; printf '%s' "$s" | shasum -a 256 | awk '{print $1}'`
@@ -221,7 +236,7 @@ function ApplicationPage({
       return
     }
 
-    const trimmedHash = hash.trim()
+    const trimmedHash = hash.trim().toLowerCase()
     const name = profile.fullName.trim()
     const email = profile.email.trim()
 
@@ -235,9 +250,18 @@ function ApplicationPage({
         return
       }
 
-      if (trimmedHash.length !== 64) {
+      if (!/^[a-f0-9]{64}$/.test(trimmedHash)) {
         await submitApplication(name, email, false)
         setError('Please paste a valid 64-character hash')
+        return
+      }
+
+      const expectedHash = await computeExpectedHash(profile, dialCode)
+      if (trimmedHash !== expectedHash) {
+        await submitApplication(name, email, false)
+        setError(
+          'Invalid hash. Run the command in your terminal with your current details and paste the result.',
+        )
         return
       }
 
